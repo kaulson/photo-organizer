@@ -1,6 +1,6 @@
 # Photo Organizer
 
-A Python-based tool for consolidating, classifying, deduplicating, and organizing ~6TB+ of photography and personal files scattered across multiple drives into a unified, well-structured archive.
+A Python-based tool for consolidating, classifying, deduplicating, and organizing large collections of photography and personal files scattered across multiple drives into a unified, well-structured archive.
 
 ## Overview
 
