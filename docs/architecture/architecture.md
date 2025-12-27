@@ -167,7 +167,7 @@ A Python-based tool for consolidating, classifying, deduplicating, and organizin
    └─ Same-size groups → proceed to step 2
 
 2. For same-size files, compute hash of first 64KB
-   └─ Unique hashes → mark as "no duplicate possible"  
+   └─ Unique hashes → mark as "no duplicate possible"
    └─ Same hash → proceed to step 3
 
 3. For still-matching files, compute hash of last 64KB
@@ -311,39 +311,39 @@ CREATE TABLE scan_sessions (
 CREATE TABLE files (
     id INTEGER PRIMARY KEY,
     scan_session_id INTEGER REFERENCES scan_sessions(id),
-    
+
     -- Source identification
     source_path TEXT NOT NULL UNIQUE,
     filename TEXT NOT NULL,
     extension TEXT,
     size INTEGER NOT NULL,
-    
+
     -- Filesystem metadata
     fs_modified TIMESTAMP,
     fs_created TIMESTAMP,
-    
+
     -- Hashes (computed progressively)
     hash_quick_start TEXT,      -- First 64KB
-    hash_quick_end TEXT,        -- Last 64KB  
+    hash_quick_end TEXT,        -- Last 64KB
     hash_full TEXT,             -- Full SHA-256
-    
+
     -- Extracted metadata
     date_exif_original TIMESTAMP,
     date_exif_create TIMESTAMP,
     date_exif_modify TIMESTAMP,
     date_path_derived TIMESTAMP,
-    
+
     -- Classification
     file_type TEXT,             -- camera_raw, phone_photo, etc.
     exif_make TEXT,
     exif_model TEXT,
-    
+
     -- Flexible metadata storage
     metadata_json TEXT,         -- JSON blob for all other extracted data
-    
+
     -- Processing state
     classified_at TIMESTAMP,
-    
+
     -- Timestamps
     scanned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -363,7 +363,7 @@ CREATE TABLE duplicates (
     detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Sidecar relationships  
+-- Sidecar relationships
 CREATE TABLE sidecars (
     id INTEGER PRIMARY KEY,
     sidecar_file_id INTEGER REFERENCES files(id),
@@ -423,7 +423,7 @@ photosort status                           # Show scan progress, file counts
 photosort classify                         # Run classification on unclassified files
 photosort classify --reclassify            # Re-run on all files
 
-# Planning  
+# Planning
 photosort plan                             # Generate plan with default strategy
 photosort plan --strategy exif_first       # Use specific date strategy
 photosort preview                          # Show summary of what plan would do
@@ -570,7 +570,7 @@ buckets:
 ### Log Levels
 
 - **DEBUG**: Every file processed, every decision made
-- **INFO**: Progress milestones, summary statistics  
+- **INFO**: Progress milestones, summary statistics
 - **WARNING**: Unexpected but handled situations (missing metadata, parse failures)
 - **ERROR**: Failures requiring attention (copy failed, verification failed)
 

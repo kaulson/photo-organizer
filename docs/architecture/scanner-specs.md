@@ -98,26 +98,26 @@ Scan complete: 2,847,293 files in 487,291 directories (3h 24m 17s)
 -- Scan session tracking
 CREATE TABLE scan_sessions (
     id INTEGER PRIMARY KEY,
-    
+
     -- Source identification
     source_root TEXT NOT NULL,           -- Absolute path to scan root
     source_drive_uuid TEXT NOT NULL,     -- UUID of source drive/partition
-    
+
     -- Timing
     started_at_unix REAL NOT NULL,       -- Unix timestamp (fractional seconds)
     started_at INTEGER NOT NULL,         -- Unix timestamp (second precision)
     completed_at_unix REAL,
     completed_at INTEGER,
-    
+
     -- Status
     status TEXT NOT NULL,                -- 'running', 'completed', 'failed'
     error_message TEXT,                  -- If status is 'failed'
-    
+
     -- Statistics
     files_scanned INTEGER DEFAULT 0,
     directories_scanned INTEGER DEFAULT 0,
     total_bytes INTEGER DEFAULT 0,
-    
+
     UNIQUE(source_root)                  -- Only one session per source_root
 );
 
@@ -125,18 +125,18 @@ CREATE TABLE scan_sessions (
 CREATE TABLE completed_directories (
     id INTEGER PRIMARY KEY,
     scan_session_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
-    
+
     -- Path (relative to source_root, empty string for root itself)
     directory_path TEXT NOT NULL,
-    
+
     -- Statistics
     file_count INTEGER NOT NULL,
     total_bytes INTEGER NOT NULL,
-    
+
     -- Timing
     completed_at_unix REAL NOT NULL,
     completed_at INTEGER NOT NULL,
-    
+
     UNIQUE(scan_session_id, directory_path)
 );
 
@@ -144,19 +144,19 @@ CREATE TABLE completed_directories (
 CREATE TABLE files (
     id INTEGER PRIMARY KEY,
     scan_session_id INTEGER NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
-    
+
     -- Path components (all paths relative to source_root)
     source_path TEXT NOT NULL,           -- Full relative path: "2019/march/IMG_001.CR2"
     directory_path TEXT NOT NULL,        -- Parent directory: "2019/march"
-    
+
     -- Filename components
     filename_full TEXT NOT NULL,         -- Full filename: "archive.tar.gz"
     filename_base TEXT NOT NULL,         -- Base name: "archive" (before first dot) or "archive.tar" (before last dot)?
     extension TEXT,                      -- Extension: "gz" (lowercase, no dot, NULL if none)
-    
+
     -- Size
     size INTEGER NOT NULL,               -- File size in bytes
-    
+
     -- Filesystem timestamps (dual precision)
     fs_modified_at_unix REAL,            -- st_mtime as fractional seconds
     fs_modified_at INTEGER,              -- st_mtime as whole seconds
@@ -166,12 +166,12 @@ CREATE TABLE files (
     fs_created_at INTEGER,
     fs_accessed_at_unix REAL,            -- st_atime
     fs_accessed_at INTEGER,
-    
+
     -- Hashes (populated by deduplication phase, NULL initially)
     hash_quick_start TEXT,               -- Hash of first 64KB
     hash_quick_end TEXT,                 -- Hash of last 64KB
     hash_full TEXT,                      -- Full file SHA-256
-    
+
     -- EXIF dates (populated by metadata extraction phase, NULL initially)
     date_exif_original_unix REAL,
     date_exif_original INTEGER,
@@ -179,19 +179,19 @@ CREATE TABLE files (
     date_exif_create INTEGER,
     date_exif_modify_unix REAL,
     date_exif_modify INTEGER,
-    
+
     -- Path-derived date (populated by metadata extraction phase)
     date_path_derived_unix REAL,
     date_path_derived INTEGER,
-    
+
     -- Classification (populated by classification phase, NULL initially)
     file_type TEXT,                      -- camera_raw, phone_photo, etc.
     exif_make TEXT,
     exif_model TEXT,
-    
+
     -- Flexible metadata storage
     metadata_json TEXT,                  -- JSON blob for additional extracted data
-    
+
     -- Processing timestamps
     scanned_at_unix REAL NOT NULL,
     scanned_at INTEGER NOT NULL,
@@ -199,7 +199,7 @@ CREATE TABLE files (
     metadata_extracted_at INTEGER,
     classified_at_unix REAL,
     classified_at INTEGER,
-    
+
     UNIQUE(scan_session_id, source_path)
 );
 
@@ -241,10 +241,10 @@ from pathlib import Path
 def parse_filename(filename: str) -> tuple[str, str, str | None]:
     """Returns (filename_full, filename_base, extension)"""
     filename_full = filename
-    
+
     path = Path(filename)
     suffix = path.suffix  # Includes the dot, e.g., ".jpg"
-    
+
     if suffix and suffix != '.':
         extension = suffix[1:].lower()  # Remove dot, lowercase
         filename_base = filename[:-len(suffix)]
@@ -252,16 +252,16 @@ def parse_filename(filename: str) -> tuple[str, str, str | None]:
     else:
         extension = None
         filename_base = filename
-    
-    # Edge case: dotfiles like ".gitignore" 
+
+    # Edge case: dotfiles like ".gitignore"
     # pathlib treats these as having no suffix, stem is ".gitignore"
     # This is correct for our purposes
-    
+
     # Edge case: "file." - suffix is ".", we treat as no extension
     if suffix == '.':
         extension = None
         filename_base = filename[:-1]
-    
+
     return filename_full, filename_base, extension
 ```
 
@@ -312,40 +312,40 @@ def get_drive_uuid(mount_point: str) -> str:
     Raises RuntimeError if UUID cannot be determined.
     """
     mount_point = str(Path(mount_point).resolve())
-    
+
     # Use findmnt to get the device for this mount point
     result = subprocess.run(
         ['findmnt', '-n', '-o', 'SOURCE', mount_point],
         capture_output=True,
         text=True
     )
-    
+
     if result.returncode != 0:
         raise RuntimeError(f"Could not find mount point: {mount_point}")
-    
+
     device = result.stdout.strip()
-    
+
     # Handle device mapper, LVM, etc.
     # The device might be like /dev/sda1, /dev/mapper/..., etc.
-    
+
     # Use lsblk to get UUID
     result = subprocess.run(
         ['lsblk', '-n', '-o', 'UUID', device],
         capture_output=True,
         text=True
     )
-    
+
     if result.returncode != 0:
         raise RuntimeError(f"Could not get UUID for device: {device}")
-    
+
     uuid = result.stdout.strip()
-    
+
     if not uuid:
         raise RuntimeError(
             f"No UUID found for {mount_point} (device: {device}). "
             "This may be a network share or virtual filesystem."
         )
-    
+
     return uuid
 ```
 
@@ -382,7 +382,7 @@ def get_drive_uuid(mount_point: str) -> str:
 On startup, check for existing session:
 
 ```sql
-SELECT * FROM scan_sessions 
+SELECT * FROM scan_sessions
 WHERE source_root = ? AND status = 'running'
 ```
 
@@ -392,7 +392,7 @@ If found: previous scan was interrupted.
 
 1. Query completed directories:
    ```sql
-   SELECT directory_path FROM completed_directories 
+   SELECT directory_path FROM completed_directories
    WHERE scan_session_id = ?
    ```
 
@@ -410,7 +410,7 @@ If a directory was partially scanned (files exist but not in completed_directori
 
 ```sql
 -- Delete partial results before re-scanning
-DELETE FROM files 
+DELETE FROM files
 WHERE scan_session_id = ? AND directory_path = ?
 ```
 
@@ -426,14 +426,14 @@ Then scan the directory fresh.
 scanner:
   # Progress reporting
   progress_interval: 1000          # Print status every N files
-  
+
   # Batch size (commits per directory, but also interim stats update)
   stats_update_interval: 100       # Update session stats every N files
-  
+
   # Error handling
   retry_io_errors: true            # Retry once on I/O errors
   max_path_length: 4096            # Skip files with paths longer than this
-  
+
   # Future: exclusion patterns (not implemented in v1)
   # exclude_patterns:
   #   - ".Trash-*"
