@@ -53,6 +53,7 @@ dmypy.json
 *.db-journal
 logs/
 .photosort/
+data/
 
 # OS
 .DS_Store
