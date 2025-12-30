@@ -59,8 +59,23 @@ CREATE TABLE IF NOT EXISTS files (
     date_exif_create INTEGER,
     date_exif_modify_unix REAL,
     date_exif_modify INTEGER,
-    date_path_derived_unix REAL,
-    date_path_derived INTEGER,
+
+    -- Path-based date extraction (Pass 1)
+    date_path_hierarchy INTEGER,
+    date_path_hierarchy_source TEXT,
+    date_path_folder INTEGER,
+    date_path_folder_source TEXT,
+    date_path_filename INTEGER,
+    date_path_filename_source TEXT,
+
+    -- Resolved path date
+    date_path_resolved INTEGER,
+    date_path_resolved_source TEXT,
+
+    -- Final resolved date (after all passes)
+    date_resolved INTEGER,
+    date_resolved_source TEXT,
+
     file_type TEXT,
     exif_make TEXT,
     exif_model TEXT,
@@ -71,6 +86,8 @@ CREATE TABLE IF NOT EXISTS files (
     metadata_extracted_at INTEGER,
     classified_at_unix REAL,
     classified_at INTEGER,
+    date_resolved_at_unix REAL,
+    date_resolved_at INTEGER,
     UNIQUE(scan_session_id, source_path)
 );
 
@@ -85,9 +102,68 @@ CREATE INDEX IF NOT EXISTS idx_files_extension ON files(extension) WHERE extensi
 CREATE INDEX IF NOT EXISTS idx_files_hash_quick
     ON files(hash_quick_start) WHERE hash_quick_start IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_files_hash_full ON files(hash_full) WHERE hash_full IS NOT NULL;
+
+-- Indexes for date resolution
+CREATE INDEX IF NOT EXISTS idx_files_date_path_hierarchy
+    ON files(date_path_hierarchy) WHERE date_path_hierarchy IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_files_date_path_folder
+    ON files(date_path_folder) WHERE date_path_folder IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_files_date_path_filename
+    ON files(date_path_filename) WHERE date_path_filename IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_files_no_path_date ON files(scan_session_id)
+    WHERE date_path_hierarchy IS NULL
+    AND date_path_folder IS NULL
+    AND date_path_filename IS NULL;
 """
 
 
 def create_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    conn.commit()
+
+
+MIGRATION_ADD_DATE_COLUMNS = """
+-- Add date resolution columns if they don't exist
+ALTER TABLE files ADD COLUMN date_path_hierarchy INTEGER;
+ALTER TABLE files ADD COLUMN date_path_hierarchy_source TEXT;
+ALTER TABLE files ADD COLUMN date_path_folder INTEGER;
+ALTER TABLE files ADD COLUMN date_path_folder_source TEXT;
+ALTER TABLE files ADD COLUMN date_path_filename INTEGER;
+ALTER TABLE files ADD COLUMN date_path_filename_source TEXT;
+ALTER TABLE files ADD COLUMN date_path_resolved INTEGER;
+ALTER TABLE files ADD COLUMN date_path_resolved_source TEXT;
+ALTER TABLE files ADD COLUMN date_resolved INTEGER;
+ALTER TABLE files ADD COLUMN date_resolved_source TEXT;
+ALTER TABLE files ADD COLUMN date_resolved_at_unix REAL;
+ALTER TABLE files ADD COLUMN date_resolved_at INTEGER;
+"""
+
+
+def migrate_add_date_columns(conn: sqlite3.Connection) -> None:
+    """Add date resolution columns to existing database."""
+    cursor = conn.execute("PRAGMA table_info(files)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+
+    new_columns = [
+        ("date_path_hierarchy", "INTEGER"),
+        ("date_path_hierarchy_source", "TEXT"),
+        ("date_path_folder", "INTEGER"),
+        ("date_path_folder_source", "TEXT"),
+        ("date_path_filename", "INTEGER"),
+        ("date_path_filename_source", "TEXT"),
+        ("date_path_resolved", "INTEGER"),
+        ("date_path_resolved_source", "TEXT"),
+        ("date_resolved", "INTEGER"),
+        ("date_resolved_source", "TEXT"),
+        ("date_resolved_at_unix", "REAL"),
+        ("date_resolved_at INTEGER", "INTEGER"),
+    ]
+
+    for col_name, col_type in new_columns:
+        if col_name not in existing_columns:
+            try:
+                conn.execute(f"ALTER TABLE files ADD COLUMN {col_name} {col_type}")
+            except sqlite3.OperationalError:
+                pass  # Column might already exist
+
     conn.commit()

@@ -8,6 +8,7 @@ import click
 
 from photosort.config import Config
 from photosort.database import Database
+from photosort.resolver.resolver import DateResolver
 from photosort.scanner import Scanner
 from photosort.scanner.uuid import DriveUUIDError
 
@@ -158,6 +159,39 @@ def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return "..." + text[-(max_len - 3) :]
+
+
+@cli.command("resolve-dates")
+@click.option("--reprocess", is_flag=True, help="Reprocess all files, not just new ones")
+@click.option("--batch-size", type=int, default=1000, help="Number of files per batch")
+@click.option("--database", type=click.Path(path_type=Path), help="Path to database file")
+@click.pass_context
+def resolve_dates(
+    ctx: click.Context,
+    reprocess: bool,
+    batch_size: int,
+    database: Path | None,
+) -> None:
+    """Resolve dates for scanned files using path-based strategies."""
+    config: Config = ctx.obj["config"]
+    db_path = database or config.database_path
+
+    if not db_path.exists():
+        click.echo("Error: No database found. Run 'photosort scan' first.", err=True)
+        sys.exit(1)
+
+    with Database(db_path) as db:
+        resolver = DateResolver(db, batch_size=batch_size)
+        click.echo("Resolving dates...")
+        stats = resolver.resolve_all(reprocess=reprocess)
+
+    click.echo()
+    click.echo("Date Resolution Complete:")
+    click.echo(f"  Total files processed: {stats.total_files:,}")
+    click.echo(f"  Files with hierarchy date: {stats.files_with_hierarchy:,}")
+    click.echo(f"  Files with folder date: {stats.files_with_folder:,}")
+    click.echo(f"  Files with filename date: {stats.files_with_filename:,}")
+    click.echo(f"  Files resolved: {stats.files_resolved:,}")
 
 
 def main() -> None:
