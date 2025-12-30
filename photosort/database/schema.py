@@ -118,6 +118,16 @@ CREATE INDEX IF NOT EXISTS idx_files_no_path_date ON files(scan_session_id)
 
 
 def create_schema(conn: sqlite3.Connection) -> None:
+    """Create schema and run migrations."""
+    # Check if files table exists (i.e., existing database)
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='files'")
+    files_exists = cursor.fetchone() is not None
+
+    if files_exists:
+        # Run migrations first for existing databases
+        migrate_add_date_columns(conn)
+
+    # Now run the full schema (CREATE IF NOT EXISTS is safe)
     conn.executescript(SCHEMA_SQL)
     conn.commit()
 
@@ -156,7 +166,7 @@ def migrate_add_date_columns(conn: sqlite3.Connection) -> None:
         ("date_resolved", "INTEGER"),
         ("date_resolved_source", "TEXT"),
         ("date_resolved_at_unix", "REAL"),
-        ("date_resolved_at INTEGER", "INTEGER"),
+        ("date_resolved_at", "INTEGER"),
     ]
 
     for col_name, col_type in new_columns:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import click
 
+from photosort.analysis.cli import analyze
 from photosort.config import Config
 from photosort.database import Database
 from photosort.resolver.resolver import DateResolver
@@ -18,6 +19,9 @@ from photosort.scanner.uuid import DriveUUIDError
 def cli(ctx: click.Context) -> None:
     ctx.ensure_object(dict)
     ctx.obj["config"] = Config()
+
+
+cli.add_command(analyze)
 
 
 @cli.command()
