@@ -605,3 +605,52 @@ For 10M files on HDD: expect 30 minutes to 3 hours.
 4. **Symlink to file vs symlink to directory**: Both skipped, or just symlink-to-directory? Specified: skip all symlinks.
 
 5. **Maximum path handling**: What if a path exceeds database limits? Skip with warning, or truncate? Specified: skip with warning.
+
+---
+
+## Implementation Notes
+
+### Resolved Open Questions
+
+All open questions have been resolved in the implementation:
+
+1. **filename_base**: Uses last dot as specified. `archive.tar.gz` → base: `archive.tar`, extension: `gz`
+2. **Empty directories**: Recorded in `completed_directories` with `file_count=0`
+3. **Root directory**: Uses empty string `""` for `directory_path`
+4. **Symlinks**: All symlinks skipped (both file and directory symlinks)
+5. **Path length**: Files with paths > `max_path_length` are skipped with a warning log
+
+### Module Responsibilities
+
+| Module | Responsibility |
+|--------|---------------|
+| `database/schema.py` | SQL schema definition, `create_schema()` function |
+| `database/connection.py` | `Database` class with context manager support |
+| `database/models.py` | Dataclasses: `ScanSession`, `FileRecord`, `CompletedDirectory`, `ParsedFilename`, `ScanStatus` enum |
+| `scanner/uuid.py` | `get_drive_uuid()` using `findmnt` and `lsblk`, `DriveUUIDError` exception |
+| `scanner/filesystem.py` | `parse_filename()`, `walk_directory()`, `FileInfo` and `DirectoryBatch` dataclasses |
+| `scanner/progress.py` | `ProgressReporter` class, `ScanStats` dataclass |
+| `scanner/scanner.py` | `Scanner` class orchestrating the scan process |
+| `cli.py` | Click-based CLI with `scan` and `status` commands |
+| `config.py` | `Config` and `ScannerConfig` dataclasses |
+
+### Key Design Decisions
+
+1. **Generator-based walking**: `walk_directory()` yields `DirectoryBatch` objects, enabling memory-efficient streaming of large directory trees
+
+2. **Transaction per directory**: Each directory is committed atomically—files are inserted, then the directory is marked complete in a single commit
+
+3. **Partial directory cleanup**: Before scanning a directory, any existing partial data for that directory is deleted to handle interrupted scans cleanly
+
+4. **Stat caching**: Uses `os.scandir()` with `DirEntry.stat(follow_symlinks=False)` to leverage kernel-level stat caching
+
+5. **Dual timestamp storage**: Each timestamp stored as both `REAL` (fractional seconds) and `INTEGER` (whole seconds) for flexibility in queries
+
+### Testing
+
+Tests are in `tests/` covering:
+- `test_filesystem.py`: Filename parsing edge cases
+- `test_database.py`: Schema creation, connection management
+- `test_scanner.py`: Directory walking, scanner integration
+
+Run tests with: `uv run pytest tests/ -v`
