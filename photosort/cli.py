@@ -11,6 +11,8 @@ from photosort.analysis.extractor_debug import debug_extractor_cmd
 from photosort.config import Config
 from photosort.database import Database
 from photosort.extractor import MetadataExtractor, ExiftoolNotFoundError
+from photosort.planner import Planner
+from photosort.planner.resolver import PlannerConfig
 from photosort.resolver.path_date_extractor import PathDateExtractor
 from photosort.scanner import Scanner
 from photosort.scanner.uuid import DriveUUIDError
@@ -261,6 +263,165 @@ def extract_metadata(
     except ExiftoolNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
+
+
+@cli.command("plan")
+@click.option(
+    "--session-id",
+    type=int,
+    default=None,
+    help="Scan session ID to plan (default: latest completed session)",
+)
+@click.option(
+    "--min-coverage",
+    type=float,
+    default=0.30,
+    help="Minimum fraction of files with dates (default: 0.30)",
+)
+@click.option(
+    "--min-prevalence",
+    type=float,
+    default=0.80,
+    help="Minimum fraction of files matching majority date (default: 0.80)",
+)
+@click.option(
+    "--max-span",
+    type=int,
+    default=3,
+    help="Maximum date span in months for consensus (default: 3)",
+)
+@click.option("--stats", "show_stats", is_flag=True, help="Show plan statistics and exit")
+@click.option("--database", type=click.Path(path_type=Path), help="Path to database file")
+@click.pass_context
+def plan(
+    ctx: click.Context,
+    session_id: int | None,
+    min_coverage: float,
+    min_prevalence: float,
+    max_span: int,
+    show_stats: bool,
+    database: Path | None,
+) -> None:
+    """Plan target folders and filenames for all scanned files."""
+    config: Config = ctx.obj["config"]
+    db_path = database or config.database_path
+
+    if not db_path.exists():
+        click.echo("Error: No database found. Run 'photosort scan' first.", err=True)
+        sys.exit(1)
+
+    planner_config = PlannerConfig(
+        min_coverage_threshold=min_coverage,
+        min_prevalence_threshold=min_prevalence,
+        max_date_span_months=max_span,
+    )
+
+    with Database(db_path) as db:
+        if show_stats:
+            # Show existing plan statistics
+            folder_count = db.conn.execute("SELECT COUNT(*) FROM folder_plan").fetchone()[0]
+            file_count = db.conn.execute("SELECT COUNT(*) FROM file_plan").fetchone()[0]
+            mixed_count = db.conn.execute(
+                "SELECT COUNT(*) FROM folder_plan WHERE target_bucket = '_mixed_dates'"
+            ).fetchone()[0]
+            non_media_count = db.conn.execute(
+                "SELECT COUNT(*) FROM folder_plan WHERE target_bucket = '_non_media'"
+            ).fetchone()[0]
+            dated_count = db.conn.execute(
+                "SELECT COUNT(*) FROM folder_plan WHERE target_bucket IS NULL"
+            ).fetchone()[0]
+
+            click.echo("Plan Statistics:")
+            click.echo(f"  Total folders planned: {folder_count:,}")
+            click.echo(f"  - Dated folders: {dated_count:,}")
+            click.echo(f"  - Mixed dates: {mixed_count:,}")
+            click.echo(f"  - Non-media: {non_media_count:,}")
+            click.echo(f"  Total files planned: {file_count:,}")
+            return
+
+        # Get scan session ID if not provided
+        if session_id is None:
+            row = db.conn.execute(
+                """
+                SELECT id FROM scan_sessions
+                WHERE status = 'completed'
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            if row is None:
+                click.echo("Error: No completed scan sessions found.", err=True)
+                sys.exit(1)
+            session_id = row["id"]
+
+        click.echo(f"Planning file organization for session {session_id}...")
+        click.echo(f"  Min coverage: {min_coverage:.0%}")
+        click.echo(f"  Min prevalence: {min_prevalence:.0%}")
+        click.echo(f"  Max date span: {max_span} months")
+        click.echo()
+
+        planner = Planner(db, config=planner_config)
+        planner.plan(session_id)
+
+        # Get statistics after planning
+        folder_count = db.conn.execute(
+            "SELECT COUNT(*) FROM folder_plan WHERE scan_session_id = ?",
+            (session_id,),
+        ).fetchone()[0]
+        file_count = db.conn.execute(
+            """
+            SELECT COUNT(*) FROM file_plan fp
+            JOIN folder_plan fop ON fp.folder_plan_id = fop.id
+            WHERE fop.scan_session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()[0]
+        mixed_count = db.conn.execute(
+            """
+            SELECT COUNT(*) FROM folder_plan
+            WHERE scan_session_id = ? AND target_bucket = '_mixed_dates'
+            """,
+            (session_id,),
+        ).fetchone()[0]
+        non_media_count = db.conn.execute(
+            """
+            SELECT COUNT(*) FROM folder_plan
+            WHERE scan_session_id = ? AND target_bucket = '_non_media'
+            """,
+            (session_id,),
+        ).fetchone()[0]
+        dated_count = db.conn.execute(
+            """
+            SELECT COUNT(*) FROM folder_plan
+            WHERE scan_session_id = ? AND target_bucket IS NULL
+            """,
+            (session_id,),
+        ).fetchone()[0]
+        duplicates = db.conn.execute(
+            """
+            SELECT COUNT(*) FROM file_plan fp
+            JOIN folder_plan fop ON fp.folder_plan_id = fop.id
+            WHERE fop.scan_session_id = ? AND fp.is_duplicate = 1
+            """,
+            (session_id,),
+        ).fetchone()[0]
+        sidecars = db.conn.execute(
+            """
+            SELECT COUNT(*) FROM file_plan fp
+            JOIN folder_plan fop ON fp.folder_plan_id = fop.id
+            WHERE fop.scan_session_id = ? AND fp.sidecar_for_file_id IS NOT NULL
+            """,
+            (session_id,),
+        ).fetchone()[0]
+
+        click.echo("Planning Complete:")
+        click.echo(f"  Folders processed: {folder_count:,}")
+        click.echo(f"  Files planned: {file_count:,}")
+        click.echo(f"  Dated folders: {dated_count:,}")
+        click.echo(f"  Mixed date folders: {mixed_count:,}")
+        click.echo(f"  Non-media folders: {non_media_count:,}")
+        click.echo(f"  Duplicates detected: {duplicates:,}")
+        click.echo(f"  Sidecars detected: {sidecars:,}")
 
 
 @cli.command("run")

@@ -174,6 +174,104 @@ CREATE INDEX IF NOT EXISTS idx_file_metadata_errors
     ON file_metadata(file_id) WHERE extraction_error IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_file_metadata_skipped
     ON file_metadata(file_id) WHERE skip_reason IS NOT NULL;
+
+-- Planner tables
+-- Folder-level planning results
+CREATE TABLE IF NOT EXISTS folder_plan (
+    id INTEGER PRIMARY KEY,
+    scan_session_id INTEGER NOT NULL,
+    source_folder TEXT NOT NULL,
+
+    -- Resolution result
+    resolved_date INTEGER,                    -- YYYYMMDD, NULL if bucketed
+    resolved_date_source TEXT,                -- 'path_date', 'prevalent_date',
+                                              -- 'unanimous', 'inherited',
+                                              -- 'low_coverage', 'wide_spread',
+                                              -- 'no_consensus', 'no_images'
+    target_folder TEXT NOT NULL,
+    bucket TEXT,                              -- NULL, 'mixed_dates', 'non_media'
+    annotation TEXT,                          -- Extracted annotation from folder name
+
+    -- File counts
+    total_file_count INTEGER NOT NULL,
+    image_file_count INTEGER NOT NULL,
+    images_with_date_count INTEGER NOT NULL,
+
+    -- Coverage metrics
+    date_coverage_pct REAL,                   -- images_with_date / image_file_count
+
+    -- Date distribution (for images with dates)
+    prevalent_date INTEGER,
+    prevalent_date_count INTEGER,
+    prevalent_date_pct REAL,                  -- prevalent_count / images_with_date
+    unique_date_count INTEGER,
+    min_date INTEGER,
+    max_date INTEGER,
+    date_span_months INTEGER,
+
+    -- Inheritance
+    inherited_from_folder_id INTEGER REFERENCES folder_plan(id),
+    is_subfolder BOOLEAN DEFAULT FALSE,
+
+    -- Thresholds used (for reproducibility)
+    config_min_coverage REAL,
+    config_min_prevalence REAL,
+    config_max_span_months INTEGER,
+
+    -- Timestamps
+    planned_at_unix REAL NOT NULL,
+    planned_at INTEGER NOT NULL,
+
+    UNIQUE(scan_session_id, source_folder)
+);
+
+CREATE INDEX IF NOT EXISTS idx_folder_plan_session
+    ON folder_plan(scan_session_id);
+CREATE INDEX IF NOT EXISTS idx_folder_plan_bucket
+    ON folder_plan(bucket) WHERE bucket IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_folder_plan_resolved_date
+    ON folder_plan(resolved_date) WHERE resolved_date IS NOT NULL;
+
+-- File-level planning results
+CREATE TABLE IF NOT EXISTS file_plan (
+    id INTEGER PRIMARY KEY,
+    file_id INTEGER NOT NULL UNIQUE REFERENCES files(id) ON DELETE CASCADE,
+    folder_plan_id INTEGER NOT NULL REFERENCES folder_plan(id) ON DELETE CASCADE,
+
+    -- Source (denormalized for easy querying)
+    source_path TEXT NOT NULL,
+    source_filename TEXT NOT NULL,
+
+    -- File's own resolved date (before folder analysis)
+    file_resolved_date INTEGER,               -- YYYYMMDD
+    file_date_source TEXT,                    -- 'path_folder', 'path_filename',
+                                              -- 'exif', 'fs_modified', 'none'
+
+    -- Target
+    target_folder TEXT NOT NULL,
+    target_path TEXT NOT NULL,                -- Full path including filename
+    target_filename TEXT NOT NULL,            -- May differ from source if duplicate
+
+    -- Flags
+    is_potential_duplicate BOOLEAN DEFAULT FALSE,
+    duplicate_source_hash TEXT,               -- Short hash used in filename
+    is_sidecar BOOLEAN DEFAULT FALSE,
+
+    -- Debugging
+    resolution_reason TEXT,                   -- Human-readable explanation
+
+    -- Timestamps
+    planned_at_unix REAL NOT NULL,
+    planned_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_plan_file_id ON file_plan(file_id);
+CREATE INDEX IF NOT EXISTS idx_file_plan_folder_id ON file_plan(folder_plan_id);
+CREATE INDEX IF NOT EXISTS idx_file_plan_target ON file_plan(target_path);
+CREATE INDEX IF NOT EXISTS idx_file_plan_duplicates
+    ON file_plan(file_id) WHERE is_potential_duplicate = TRUE;
+CREATE INDEX IF NOT EXISTS idx_file_plan_sidecars
+    ON file_plan(file_id) WHERE is_sidecar = TRUE;
 """
 
 
