@@ -47,7 +47,7 @@ A Python-based tool for consolidating, classifying, deduplicating, and organizin
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Core Components                          │
 │  ┌───────────┐ ┌────────────┐ ┌──────────────────┐ ┌─────────────┐ │
-│  │  Scanner  │ │ Classifier │ │PathDateExtractor│ │Deduplicator │ │
+│  │  Scanner  │ │ Classifier │ │PathDateExtractor │ │Deduplicator │ │
 │  └───────────┘ └────────────┘ └──────────────────┘ └─────────────┘ │
 │  ┌───────────┐ ┌────────────┐ ┌──────────────┐                 │
 │  │  Planner  │ │  Executor  │ │   Verifier   │                 │

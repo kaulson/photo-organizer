@@ -114,6 +114,66 @@ CREATE INDEX IF NOT EXISTS idx_files_no_path_date ON files(scan_session_id)
     WHERE date_path_hierarchy IS NULL
     AND date_path_folder IS NULL
     AND date_path_filename IS NULL;
+
+-- Metadata extraction results (separate table per spec)
+CREATE TABLE IF NOT EXISTS file_metadata (
+    id INTEGER PRIMARY KEY,
+    file_id INTEGER NOT NULL UNIQUE REFERENCES files(id) ON DELETE CASCADE,
+
+    -- Core dates (exiftool normalizes these across formats)
+    date_original_unix REAL,
+    date_original INTEGER,
+    date_digitized_unix REAL,
+    date_digitized INTEGER,
+    date_modify_unix REAL,
+    date_modify INTEGER,
+
+    -- Camera/device info
+    make TEXT,
+    model TEXT,
+    lens_model TEXT,
+
+    -- Dimensions
+    image_width INTEGER,
+    image_height INTEGER,
+    orientation INTEGER,
+
+    -- Video-specific
+    duration_seconds REAL,
+    video_frame_rate REAL,
+
+    -- GPS
+    gps_latitude REAL,
+    gps_longitude REAL,
+    gps_altitude REAL,
+
+    -- Format info
+    mime_type TEXT,
+    metadata_families TEXT,
+
+    -- Full dump (filtered, no binary data)
+    metadata_json TEXT,
+
+    -- Extraction tracking
+    extracted_at_unix REAL NOT NULL,
+    extracted_at INTEGER NOT NULL,
+    extractor_version TEXT,
+    extraction_error TEXT,
+    skip_reason TEXT
+);
+
+-- Indexes for file_metadata
+CREATE INDEX IF NOT EXISTS idx_file_metadata_file_id ON file_metadata(file_id);
+CREATE INDEX IF NOT EXISTS idx_file_metadata_date_original
+    ON file_metadata(date_original) WHERE date_original IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_file_metadata_make_model
+    ON file_metadata(make, model) WHERE make IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_file_metadata_has_gps
+    ON file_metadata(file_id) WHERE gps_latitude IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_file_metadata_errors
+    ON file_metadata(file_id) WHERE extraction_error IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_file_metadata_skipped
+    ON file_metadata(file_id) WHERE skip_reason IS NOT NULL;
 """
 
 
@@ -126,6 +186,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
     if files_exists:
         # Run migrations first for existing databases
         migrate_add_date_columns(conn)
+        migrate_add_skip_reason_column(conn)
 
     # Now run the full schema (CREATE IF NOT EXISTS is safe)
     conn.executescript(SCHEMA_SQL)
@@ -177,3 +238,16 @@ def migrate_add_date_columns(conn: sqlite3.Connection) -> None:
                 pass  # Column might already exist
 
     conn.commit()
+
+
+def migrate_add_skip_reason_column(conn: sqlite3.Connection) -> None:
+    """Add skip_reason column to file_metadata table if it doesn't exist."""
+    cursor = conn.execute("PRAGMA table_info(file_metadata)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+
+    if "skip_reason" not in existing_columns:
+        try:
+            conn.execute("ALTER TABLE file_metadata ADD COLUMN skip_reason TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column might already exist or table doesn't exist yet

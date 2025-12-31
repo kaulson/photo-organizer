@@ -22,13 +22,13 @@ class AnalysisConfig:
 
 
 # Make print flush immediately for real-time output
-_original_print = builtins.print
+ORIGINAL_PRINT = builtins.print  # pylint: disable=invalid-name
 
 
 def _flush_print(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
     """Print with immediate flush."""
     kwargs.setdefault("flush", True)
-    _original_print(*args, **kwargs)
+    ORIGINAL_PRINT(*args, **kwargs)
 
 
 # Override print in this module

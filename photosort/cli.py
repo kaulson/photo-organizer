@@ -7,8 +7,10 @@ from pathlib import Path
 import click
 
 from photosort.analysis.cli import analyze
+from photosort.analysis.extractor_debug import debug_extractor_cmd
 from photosort.config import Config
 from photosort.database import Database
+from photosort.extractor import MetadataExtractor, ExiftoolNotFoundError
 from photosort.resolver.path_date_extractor import PathDateExtractor
 from photosort.scanner import Scanner
 from photosort.scanner.uuid import DriveUUIDError
@@ -22,6 +24,7 @@ def cli(ctx: click.Context) -> None:
 
 
 cli.add_command(analyze)
+cli.add_command(debug_extractor_cmd)
 
 
 @cli.command()
@@ -196,6 +199,159 @@ def resolve_dates(
     click.echo(f"  Files with folder date: {stats.files_with_folder:,}")
     click.echo(f"  Files with filename date: {stats.files_with_filename:,}")
     click.echo(f"  Files resolved: {stats.files_resolved:,}")
+
+
+@cli.command("extract-metadata")
+@click.option(
+    "--strategy",
+    type=click.Choice(["full", "selective"]),
+    default="selective",
+    help="Extraction strategy: full (all files) or selective (dateless only)",
+)
+@click.option("--batch-size", type=int, default=100, help="Files per exiftool invocation")
+@click.option("--limit", type=int, default=None, help="Maximum files to process")
+@click.option("--stats", "show_stats", is_flag=True, help="Show extraction statistics and exit")
+@click.option("--database", type=click.Path(path_type=Path), help="Path to database file")
+@click.pass_context
+def extract_metadata(
+    ctx: click.Context,
+    strategy: str,
+    batch_size: int,
+    limit: int | None,
+    show_stats: bool,
+    database: Path | None,
+) -> None:
+    """Extract metadata from image and video files using exiftool."""
+    config: Config = ctx.obj["config"]
+    db_path = database or config.database_path
+
+    if not db_path.exists():
+        click.echo("Error: No database found. Run 'photosort scan' first.", err=True)
+        sys.exit(1)
+
+    try:
+        with Database(db_path) as db:
+            extractor = MetadataExtractor(db, batch_size=batch_size)
+
+            if show_stats:
+                db_stats = extractor.get_stats()
+                click.echo("Metadata Extraction Statistics:")
+                click.echo(f"  Total extracted: {db_stats.get("total", 0):,}")
+                click.echo(f"  Successful: {db_stats.get("success", 0):,}")
+                click.echo(f"  Skipped: {db_stats.get("skipped", 0):,}")
+                click.echo(f"  Errors: {db_stats.get("errors", 0):,}")
+                click.echo(f"  With date: {db_stats.get("with_date", 0):,}")
+                click.echo(f"  With GPS: {db_stats.get("with_gps", 0):,}")
+                return
+
+            click.echo(f"Starting metadata extraction (strategy: {strategy})")
+            click.echo(f"exiftool version: {extractor.exiftool.version}")
+
+            stats = extractor.extract_all(strategy=strategy, limit=limit)
+
+            click.echo()
+            click.echo("Metadata Extraction Complete:")
+            click.echo(f"  Total files processed: {stats.total_files:,}")
+            click.echo(f"  Successfully extracted: {stats.files_extracted:,}")
+            click.echo(f"  Skipped (too small): {stats.files_skipped:,}")
+            click.echo(f"  With original date: {stats.files_with_date_original:,}")
+            click.echo(f"  With GPS: {stats.files_with_gps:,}")
+            click.echo(f"  Errors: {stats.files_failed:,}")
+
+    except ExiftoolNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command("run")
+@click.argument("source_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--progress-interval", type=int, default=1000, help="Print status every N files")
+@click.option("--batch-size", type=int, default=100, help="Files per batch for extraction")
+@click.option(
+    "--metadata-strategy",
+    type=click.Choice(["full", "selective"]),
+    default="selective",
+    help="Metadata extraction strategy",
+)
+@click.option("--database", type=click.Path(path_type=Path), help="Path to database file")
+@click.pass_context
+def run_pipeline(
+    ctx: click.Context,
+    source_path: Path,
+    progress_interval: int,
+    batch_size: int,
+    metadata_strategy: str,
+    database: Path | None,
+) -> None:
+    """Run the full pipeline: scan → resolve-dates → extract-metadata."""
+    config: Config = ctx.obj["config"]
+    db_path = database or config.database_path
+
+    click.echo("=" * 60)
+    click.echo("PHOTOSORT PIPELINE")
+    click.echo("=" * 60)
+    click.echo()
+
+    # Step 1: Scan
+    click.echo("[1/3] SCANNING FILES")
+    click.echo("-" * 40)
+    try:
+        with Database(db_path) as db:
+            scanner = Scanner(db, progress_interval=progress_interval)
+            scan_stats = scanner.scan(source_path, resume=False)
+        click.echo(f"Scan complete: {scan_stats.files_scanned:,} files")
+    except DriveUUIDError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        click.echo("\nPipeline interrupted during scan.")
+        sys.exit(130)
+
+    click.echo()
+
+    # Step 2: Resolve dates from paths
+    click.echo("[2/3] EXTRACTING DATES FROM PATHS")
+    click.echo("-" * 40)
+    try:
+        with Database(db_path) as db:
+            path_extractor = PathDateExtractor(db, batch_size=1000)
+            path_stats = path_extractor.resolve_all(reprocess=False)
+        click.echo(f"Path dates resolved: {path_stats.files_resolved:,} files")
+    except KeyboardInterrupt:
+        click.echo("\nPipeline interrupted during path date extraction.")
+        sys.exit(130)
+
+    click.echo()
+
+    # Step 3: Extract metadata
+    click.echo("[3/3] EXTRACTING METADATA")
+    click.echo("-" * 40)
+    try:
+        with Database(db_path) as db:
+            metadata_extractor = MetadataExtractor(db, batch_size=batch_size)
+            click.echo(f"exiftool version: {metadata_extractor.exiftool.version}")
+            meta_stats = metadata_extractor.extract_all(strategy=metadata_strategy)
+        click.echo(f"Metadata extracted: {meta_stats.files_extracted:,} files")
+    except ExiftoolNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        click.echo("\nPipeline interrupted during metadata extraction.")
+        sys.exit(130)
+
+    # Summary
+    click.echo()
+    click.echo("=" * 60)
+    click.echo("PIPELINE COMPLETE")
+    click.echo("=" * 60)
+    click.echo()
+    click.echo("Summary:")
+    click.echo(f"  Files scanned: {scan_stats.files_scanned:,}")
+    click.echo(f"  Path dates resolved: {path_stats.files_resolved:,}")
+    click.echo(f"  Metadata extracted: {meta_stats.files_extracted:,}")
+    click.echo(f"  Metadata errors: {meta_stats.files_failed:,}")
+    click.echo()
+    click.echo(f"Database: {db_path}")
 
 
 def main() -> None:
