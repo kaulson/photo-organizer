@@ -1,33 +1,33 @@
-# DateResolver Specification
+# PathDateExtractor Specification
 
 ## Overview
 
-The DateResolver is responsible for determining the "capture date" or "logical date" of files in the photo archive. This date is used to decide where files should be placed in the target directory structure.
+The PathDateExtractor is responsible for extracting date information from file paths in the photo archive. This component focuses exclusively on path-based date extraction, which is Pass 1 of the overall date resolution pipeline.
 
 ### Design Philosophy
 
-The DateResolver prioritizes **path-encoded dates** over metadata because:
+The PathDateExtractor prioritizes **path-encoded dates** over metadata because:
 
 1. **Metadata can be corrupted** — files restored from broken drives may have incorrect timestamps
 2. **Intentional grouping matters** — photos taken across midnight during a night shoot should stay grouped by "shooting day," not split by technical capture time
 3. **Sidecars and derivatives** — `.xmp` files, exports, and other non-image files often have creation dates unrelated to the original capture, but live alongside their source images
 
-### Two-Pass Architecture
+### Multi-Pass Architecture
 
-The DateResolver operates in two passes:
+Date resolution is a multi-pass process. The PathDateExtractor implements **Pass 1** only:
 
-**Pass 1: Path-Based Extraction (this spec)**
+**Pass 1: Path-Based Extraction (PathDateExtractor - this spec)**
 - Extracts date signals from file paths using multiple strategies
 - Stores all extracted signals for later analysis and conflict detection
 - Fast: operates purely on path strings already in the database
 
-**Pass 2: Metadata Extraction (future spec)**
+**Pass 2: Metadata Extraction (separate component, future spec)**
 - Runs only for files where Pass 1 yields no usable date
 - Extracts EXIF data from images, metadata from videos
 - Expensive: requires reading file contents
 - Scope will be determined after analyzing Pass 1 results
 
-**Sibling Inference (future spec)**
+**Sibling Inference (separate component, future spec)**
 - Non-image files inherit dates from image files in the same folder
 - Strictly same-level only (not subfolders)
 - Runs after Pass 1 and Pass 2 to fill remaining gaps

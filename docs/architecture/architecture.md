@@ -46,9 +46,9 @@ A Python-based tool for consolidating, classifying, deduplicating, and organizin
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Core Components                          │
-│  ┌───────────┐ ┌────────────┐ ┌──────────────┐ ┌─────────────┐ │
-│  │  Scanner  │ │ Classifier │ │ DateResolver │ │Deduplicator │ │
-│  └───────────┘ └────────────┘ └──────────────┘ └─────────────┘ │
+│  ┌───────────┐ ┌────────────┐ ┌──────────────────┐ ┌─────────────┐ │
+│  │  Scanner  │ │ Classifier │ │PathDateExtractor│ │Deduplicator │ │
+│  └───────────┘ └────────────┘ └──────────────────┘ └─────────────┘ │
 │  ┌───────────┐ ┌────────────┐ ┌──────────────┐                 │
 │  │  Planner  │ │  Executor  │ │   Verifier   │                 │
 │  └───────────┘ └────────────┘ └──────────────┘                 │
@@ -119,39 +119,29 @@ A Python-based tool for consolidating, classifying, deduplicating, and organizin
 
 ---
 
-### DateResolver
+### PathDateExtractor
 
-**Responsibility**: Extract all date signals from a file and apply strategy to choose canonical date.
+**Responsibility**: Extract date information from file paths using multiple strategies.
 
-**Date signals extracted** (in typical priority order):
+**Behavior**:
+- Analyzes file paths to extract dates using three strategies: hierarchy, folder, and filename
+- Focuses exclusively on path-based extraction (no metadata reading)
+- Part of a multi-pass date resolution pipeline
+- Fast: operates purely on path strings already in the database
 
-| Signal | Source | Reliability |
-|--------|--------|-------------|
-| `date_exif_original` | EXIF DateTimeOriginal | High - shutter click time |
-| `date_exif_create` | EXIF CreateDate | High |
-| `date_exif_modify` | EXIF ModifyDate | Medium - may reflect edits |
-| `date_path_derived` | Parsed from path (yyyy/mm/dd patterns) | Medium - reflects past organization intent |
-| `date_filesystem_modified` | File mtime | Low - often reflects copy time |
-| `date_filesystem_created` | File ctime/birthtime | Low - filesystem dependent |
+**Path-based date extraction strategies**:
 
-**Path parsing patterns**:
-- `yyyy/mm/dd/` or `yyyy/mm/yyyy-mm-dd/` → extract date
-- `yyyy/mm/yyyymmdd/` → extract date
-- `yyyymmdd` in folder name → extract date
-- Configurable regex patterns for custom structures
+| Strategy | Pattern | Example |
+|----------|---------|---------|
+| `hierarchy` | yyyy/mm/dd folder structure | `/archive/2023/05/14/IMG_001.arw` → 20230514 |
+| `folder` | Date in folder name | `/archive/20230514-sunset/IMG_001.arw` → 20230514 |
+| `filename` | Date in filename | `/archive/photos/IMG_20230514_143052.jpg` → 20230514 |
 
-**Strategies**:
+**Priority**: hierarchy > folder > filename (when multiple strategies match)
 
-| Strategy | Behavior |
-|----------|----------|
-| `path_first` | Prefer path-derived date, fall back to EXIF, then filesystem |
-| `exif_first` | Prefer EXIF original, fall back to path, then filesystem |
-| `newest` | Use the most recent date from all signals |
-| `oldest` | Use the oldest date from all signals |
+**Output**: All extraction results are stored separately for analysis. The component also computes a resolved date based on the priority order.
 
-**Rationale for `path_first` as default**: Past organizational decisions often encode intent (e.g., night sky session spanning midnight kept in one folder). EXIF is "more accurate" but path may be "more correct" for organization purposes.
-
-**Output**: `date_chosen` field populated based on strategy. All original signals preserved for later re-evaluation.
+**Note**: Metadata-based date extraction (EXIF, video metadata) is handled by a separate component in a later pass. See the metadata-extractor-spec.md for details.
 
 ---
 
@@ -598,7 +588,7 @@ Create a script that generates a test filesystem structure with:
 
 ### Test Modes
 
-1. **Unit tests**: Individual components (DateResolver, Classifier, path merging logic)
+1. **Unit tests**: Individual components (PathDateExtractor, Classifier, path merging logic)
 
 2. **Integration tests**: Full scan → classify → plan → execute on synthetic data
 

@@ -9,7 +9,7 @@ import click
 from photosort.analysis.cli import analyze
 from photosort.config import Config
 from photosort.database import Database
-from photosort.resolver.resolver import DateResolver
+from photosort.resolver.path_date_extractor import PathDateExtractor
 from photosort.scanner import Scanner
 from photosort.scanner.uuid import DriveUUIDError
 
@@ -185,12 +185,12 @@ def resolve_dates(
         sys.exit(1)
 
     with Database(db_path) as db:
-        resolver = DateResolver(db, batch_size=batch_size)
-        click.echo("Resolving dates...")
-        stats = resolver.resolve_all(reprocess=reprocess)
+        extractor = PathDateExtractor(db, batch_size=batch_size)
+        click.echo("Extracting dates from paths...")
+        stats = extractor.resolve_all(reprocess=reprocess)
 
     click.echo()
-    click.echo("Date Resolution Complete:")
+    click.echo("Path Date Extraction Complete:")
     click.echo(f"  Total files processed: {stats.total_files:,}")
     click.echo(f"  Files with hierarchy date: {stats.files_with_hierarchy:,}")
     click.echo(f"  Files with folder date: {stats.files_with_folder:,}")

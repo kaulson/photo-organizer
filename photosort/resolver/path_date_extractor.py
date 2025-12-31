@@ -1,4 +1,4 @@
-"""DateResolver class for batch processing files from the database."""
+"""PathDateExtractor class for batch processing files from the database."""
 
 import logging
 import time
@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ResolverStats:
-    """Statistics from a date resolution run."""
+class PathDateExtractorStats:
+    """Statistics from a path date extraction run."""
 
     total_files: int = 0
     files_with_hierarchy: int = 0
@@ -27,22 +27,22 @@ class ResolverStats:
     files_resolved: int = 0
 
 
-class DateResolver:
-    """Resolves dates for files in the database using path-based strategies."""
+class PathDateExtractor:
+    """Extracts dates from file paths in the database using path-based strategies."""
 
     def __init__(self, database: Database, batch_size: int = 1000) -> None:
         """Initialize resolver with database connection."""
         self.db = database
         self.batch_size = batch_size
 
-    def resolve_all(self, reprocess: bool = False) -> ResolverStats:
+    def resolve_all(self, reprocess: bool = False) -> PathDateExtractorStats:
         """
-        Resolve dates for all files in the database.
+        Extract dates from paths for all files in the database.
 
         Args:
             reprocess: If True, reprocess all files. If False, only unprocessed.
         """
-        stats = ResolverStats()
+        stats = PathDateExtractorStats()
 
         if reprocess:
             offset = 0
@@ -102,7 +102,7 @@ class DateResolver:
         file_id: int,
         relative_path: str,
         filename: str,
-        stats: ResolverStats,
+        stats: PathDateExtractorStats,
     ) -> dict:
         """Process a single file and return update parameters."""
         hierarchy = extract_hierarchy_date(relative_path)

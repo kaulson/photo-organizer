@@ -1,4 +1,4 @@
-"""Tests for DateResolver class."""
+"""Tests for PathDateExtractor class."""
 
 # pylint: disable=redefined-outer-name
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from photosort.database import Database
-from photosort.resolver.resolver import DateResolver
+from photosort.resolver.path_date_extractor import PathDateExtractor
 
 
 @pytest.fixture
@@ -95,12 +95,12 @@ def seeded_db(temp_db: Database) -> Database:
     return temp_db
 
 
-class TestDateResolver:
-    """Tests for DateResolver class."""
+class TestPathDateExtractor:
+    """Tests for PathDateExtractor class."""
 
     def test_resolve_hierarchy_date(self, seeded_db: Database) -> None:
-        resolver = DateResolver(seeded_db, batch_size=10)
-        resolver.resolve_all()
+        extractor = PathDateExtractor(seeded_db, batch_size=10)
+        extractor.resolve_all()
 
         row = seeded_db.conn.execute(
             "SELECT * FROM files WHERE filename_full = 'photo1.jpg'"
@@ -111,8 +111,8 @@ class TestDateResolver:
         assert row["date_resolved_source"] == "hierarchy"
 
     def test_resolve_folder_date(self, seeded_db: Database) -> None:
-        resolver = DateResolver(seeded_db)
-        resolver.resolve_all()
+        extractor = PathDateExtractor(seeded_db)
+        extractor.resolve_all()
 
         row = seeded_db.conn.execute(
             "SELECT * FROM files WHERE filename_full = 'sunset.jpg'"
@@ -123,8 +123,8 @@ class TestDateResolver:
         assert row["date_resolved_source"] == "folder"
 
     def test_resolve_filename_date(self, seeded_db: Database) -> None:
-        resolver = DateResolver(seeded_db)
-        resolver.resolve_all()
+        extractor = PathDateExtractor(seeded_db)
+        extractor.resolve_all()
 
         row = seeded_db.conn.execute(
             "SELECT * FROM files WHERE filename_full = 'IMG_20231225_143052.jpg'"
@@ -135,8 +135,8 @@ class TestDateResolver:
         assert row["date_resolved_source"] == "filename"
 
     def test_no_date_resolved(self, seeded_db: Database) -> None:
-        resolver = DateResolver(seeded_db)
-        resolver.resolve_all()
+        extractor = PathDateExtractor(seeded_db)
+        extractor.resolve_all()
 
         row = seeded_db.conn.execute(
             "SELECT * FROM files WHERE filename_full = 'nodate.jpg'"
@@ -147,8 +147,8 @@ class TestDateResolver:
         assert row["date_resolved_at_unix"] is not None
 
     def test_hierarchy_takes_priority(self, seeded_db: Database) -> None:
-        resolver = DateResolver(seeded_db)
-        resolver.resolve_all()
+        extractor = PathDateExtractor(seeded_db)
+        extractor.resolve_all()
 
         row = seeded_db.conn.execute(
             "SELECT * FROM files WHERE source_path LIKE '%2023/08/15%'"
@@ -161,8 +161,8 @@ class TestDateResolver:
         assert row["date_resolved_source"] == "hierarchy"
 
     def test_stats_accuracy(self, seeded_db: Database) -> None:
-        resolver = DateResolver(seeded_db)
-        stats = resolver.resolve_all()
+        extractor = PathDateExtractor(seeded_db)
+        stats = extractor.resolve_all()
 
         assert stats.total_files == 5
         assert stats.files_with_hierarchy == 2
@@ -171,14 +171,14 @@ class TestDateResolver:
         assert stats.files_resolved == 4
 
     def test_reprocess_updates_all(self, seeded_db: Database) -> None:
-        resolver = DateResolver(seeded_db)
+        extractor = PathDateExtractor(seeded_db)
 
-        resolver.resolve_all()
+        extractor.resolve_all()
 
-        stats = resolver.resolve_all(reprocess=False)
+        stats = extractor.resolve_all(reprocess=False)
         assert stats.total_files == 0
 
-        stats = resolver.resolve_all(reprocess=True)
+        stats = extractor.resolve_all(reprocess=True)
         assert stats.total_files == 5
 
     def test_batch_processing(self, temp_db: Database) -> None:
@@ -196,7 +196,7 @@ class TestDateResolver:
             )
         temp_db.conn.commit()
 
-        resolver = DateResolver(temp_db, batch_size=10)
-        stats = resolver.resolve_all()
+        extractor = PathDateExtractor(temp_db, batch_size=10)
+        stats = extractor.resolve_all()
 
         assert stats.total_files == 55
